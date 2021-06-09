@@ -13,9 +13,10 @@ from tf_agents.replay_buffers.tf_uniform_replay_buffer import TFUniformReplayBuf
 from tensorflow.python.framework.tensor_spec import BoundedTensorSpec
 from tf_agents.trajectories import trajectory
 from statistics import mean
-
+import pickle
 
 def set_up_grid():
+    # creates 5x5 grid with random goal
     np_grid = np.zeros((5, 5), dtype=np.int32)
     goal = (randint(0, 4), randint(0, 4))
     while goal == (0, 0) or goal == (4, 4):
@@ -28,6 +29,7 @@ def set_up_grid():
 
 
 def print_grid(np_grid):
+    # prints formatted grid
     np_grid = np_grid.reshape(5, 5)
     grid_str = '''
     |{}|{}|{}|{}|{}|
@@ -41,6 +43,7 @@ def print_grid(np_grid):
 
 
 def move_players(np_grid, senior_move, analyst_move):
+    # moves players, checks for result
     np_grid = np_grid.reshape(5, 5)
     senior_pos = np.where(np_grid == 1)
     senior_pos = senior_pos[0][0], senior_pos[1][0]
@@ -57,7 +60,8 @@ def move_players(np_grid, senior_move, analyst_move):
         new_senior_pos = senior_pos[0], senior_pos[1] - 1
     else:
         new_senior_pos = senior_pos
-
+        
+    # check move doesn't take player off the grid
     if any(x < 0 for x in new_senior_pos) or any(x > 4 for x in new_senior_pos):
         new_senior_pos = senior_pos
 
@@ -74,10 +78,11 @@ def move_players(np_grid, senior_move, analyst_move):
 
     if any(x < 0 for x in new_analyst_pos) or any(x > 4 for x in new_analyst_pos):
         new_analyst_pos = analyst_pos
-
+    # check if both players reached target this move
     if np_grid[new_senior_pos] == np_grid[new_analyst_pos] == 3:
         result = 'draw'
-
+        
+    # check if players are trying to occupy same square
     elif new_analyst_pos == new_senior_pos:
         result = 'continue'
 
@@ -220,7 +225,7 @@ class MARLAgent(DqnAgent):
             observation=time_step.observation
         )
 
-
+# custom rewards for analyst agent
 def analyst_reward_fn(ts: TimeStep):
     return ts.reward * -1 if (ts.reward != 0.5 and ts.reward != -0.5) else ts.reward
 
@@ -230,6 +235,12 @@ grid_env = TFPyEnvironment(grid_env)
 actions = BoundedTensorSpec.from_spec(array_spec.BoundedArraySpec(shape=(), dtype=np.int32, minimum=0, maximum=4))
 senior = MARLAgent(grid_env, action_spec=actions, fc_layer_params=(50, 100, 200))
 analyst = MARLAgent(grid_env, action_spec=actions, reward_fn=analyst_reward_fn)
+
+# code to load a pretrain model:
+# sc_model = tf.train.Checkpoint(q_net=senior.q_net)
+# an_model = tf.train.Checkpoint(q_net=analyst.q_net)
+# sc_model.restore('models/sc_checkfin-1')
+# an_model.restore('models/an_checkfin-1')
 
 from PIL import Image
 import imageio
@@ -262,13 +273,11 @@ def create_gif(grids, file_name: str):
 
     return imageio.mimsave('gifs/' + file_name + '.gif', gif_images, duration=0.2)
 
-
+# play 100 games 500 times
 games_per_it = 100
-total_its = 1500
+total_its = 500
 total_game_count = 0
 iteration_move_avg = []
-iteration_sen_loss = []
-iteration_ana_loss = []
 
 for iteration in range(total_its):
     print('iteration: ', iteration + 1)
@@ -328,7 +337,12 @@ for iteration in range(total_its):
 
     iteration_move_avg.append(mean(all_move_counts))
 
+# saving model for further training
 sc_checkpoint = tf.train.Checkpoint(q_net=senior.q_net)
 sc_checkpoint.save('models/sc_check')
 an_checkpoint = tf.train.Checkpoint(q_net=analyst.q_net)
 an_checkpoint.save('models/an_check')
+
+# save move averages for analysis
+with open('average_moves.pk', 'wb') as f:
+    pickle.dump(iteration_move_avg, f)
